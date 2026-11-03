@@ -1995,15 +1995,15 @@
         }
         .header-menu-dropdown {
             display: none;
-            position: absolute;
-            top: calc(100% + 6px);
+            position: fixed;
+            top: 0;
             right: 0;
             min-width: 180px;
             background: var(--bg-secondary);
             border: 1px solid var(--border-color);
             border-radius: 10px;
             box-shadow: 0 8px 24px rgba(0,0,0,0.15);
-            z-index: 6000;
+            z-index: 10050;
             padding: 6px;
             flex-direction: column;
             gap: 2px;
@@ -3534,7 +3534,7 @@
                         <button class="btn btn-sm btn-excel manager-only" onclick="exportToExcel(); closeHeaderMenu();"><i class="fas fa-file-excel"></i> Excel</button>
                         <button class="btn btn-sm manager-only" style="background:#0d9488;color:white;border-color:#0d9488;" onclick="openManageSolicitudesModal(); closeHeaderMenu();"><i class="fas fa-link"></i> Solicitudes</button>
                         <button class="btn btn-sm btn-danger manager-only" onclick="eliminarBD(); closeHeaderMenu();"><i class="fas fa-database"></i> Eliminar BD</button>
-                        <button class="btn btn-sm" style="background:#0d9488;color:white;border-color:#0d9488;" onclick="openAiConfigModal(); closeHeaderMenu();"><i class="fas fa-robot"></i> Configurar Asistente IA</button>
+                        <button class="btn btn-sm manager-only" style="background:#0d9488;color:white;border-color:#0d9488;" onclick="openAiConfigModal(); closeHeaderMenu();"><i class="fas fa-robot"></i> Configurar Asistente IA</button>
                         <div class="menu-divider"></div>
                         <button class="btn btn-sm" style="color:var(--red);" onclick="logout(); closeHeaderMenu();"><i class="fas fa-sign-out-alt"></i> Salir</button>
                     </div>
@@ -6326,7 +6326,17 @@
         // ============================================================
         const SUPABASE_URL = 'https://djzbzedgufezoaueocua.supabase.co';
         const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRqemJ6ZWRndWZlem9hdWVvY3VhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTAxODQ2NTMsImV4cCI6MjEwNTc2MDY1M30.736HsNqnz_hZnQ68rWvMsA99IqtttqgBXnF8EzNvC5w';
-        const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        let supabaseClient = null;
+        try {
+            if (window.supabase && typeof window.supabase.createClient === 'function') {
+                supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+            } else {
+                console.warn('[Hermes] Supabase SDK no cargó; se usará modo local.');
+            }
+        } catch (e) {
+            console.warn('[Hermes] Error creando cliente Supabase:', e);
+            supabaseClient = null;
+        }
 
         const STORAGE_KEY = 'hermes_documental_v38';
         let data = null;
@@ -7279,16 +7289,51 @@
         // ============================================================
         // MENÚ COLAPSABLE DEL ENCABEZADO
         // ============================================================
+        function positionHeaderMenuDropdown() {
+            const dd = document.getElementById('headerMenuDropdown');
+            const btn = document.getElementById('headerMenuBtn');
+            if (!dd || !btn) return;
+            const r = btn.getBoundingClientRect();
+            const pad = 6;
+            const width = Math.max(dd.offsetWidth || 180, 180);
+            let left = r.right - width;
+            if (left < 8) left = 8;
+            if (left + width > window.innerWidth - 8) left = Math.max(8, window.innerWidth - width - 8);
+            let top = r.bottom + pad;
+            dd.style.left = left + 'px';
+            dd.style.right = 'auto';
+            dd.style.top = top + 'px';
+            requestAnimationFrame(() => {
+                const h = dd.offsetHeight || 0;
+                if (top + h > window.innerHeight - 8 && r.top - pad - h > 8) {
+                    dd.style.top = (r.top - pad - h) + 'px';
+                }
+            });
+        }
         function toggleHeaderMenu(e) {
             if (e) e.stopPropagation();
             const dd = document.getElementById('headerMenuDropdown');
             if (!dd) return;
-            dd.classList.toggle('open');
+            const willOpen = !dd.classList.contains('open');
+            if (willOpen) {
+                dd.classList.add('open');
+                positionHeaderMenuDropdown();
+            } else {
+                dd.classList.remove('open');
+            }
         }
         function closeHeaderMenu() {
             const dd = document.getElementById('headerMenuDropdown');
             if (dd) dd.classList.remove('open');
         }
+        window.addEventListener('resize', function() {
+            const dd = document.getElementById('headerMenuDropdown');
+            if (dd && dd.classList.contains('open')) positionHeaderMenuDropdown();
+        });
+        window.addEventListener('scroll', function() {
+            const dd = document.getElementById('headerMenuDropdown');
+            if (dd && dd.classList.contains('open')) positionHeaderMenuDropdown();
+        }, true);
         document.addEventListener('click', function(e) {
             const wrap = document.querySelector('.header-menu-wrap');
             if (wrap && !wrap.contains(e.target)) closeHeaderMenu();
@@ -11802,10 +11847,20 @@ function getFilteredData() {
         };
         window.HermesAI = HermesAI;
 
-        initDupCheckModal();
-        initializeApp().then(() => { try { HermesAI.syncFab(); } catch (e) {} });
-        const _aiObs = new MutationObserver(() => { try { HermesAI.syncFab(); } catch (e) {} });
+        try { initDupCheckModal(); } catch (e) { console.warn('[Hermes] initDupCheckModal', e); }
         try {
+            Promise.resolve(initializeApp()).then(() => {
+                try { HermesAI.syncFab(); } catch (e) {}
+            }).catch((e) => {
+                console.error('[Hermes] initializeApp', e);
+                try { showLogin(); } catch (e2) { console.error(e2); }
+            });
+        } catch (e) {
+            console.error('[Hermes] bootstrap', e);
+            try { showLogin(); } catch (e2) {}
+        }
+        try {
+            const _aiObs = new MutationObserver(() => { try { HermesAI.syncFab(); } catch (e) {} });
             const ac = document.getElementById('appContainer');
             if (ac) _aiObs.observe(ac, { attributes: true, attributeFilter: ['style', 'class'] });
         } catch (e) {}
